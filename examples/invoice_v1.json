@@ -1,0 +1,32 @@
+{
+  "invoiceId": "INV-2026-0042",
+  "issueDate": "2026-11-20",
+  "currency": "EUR",
+  "supplier": {
+    "endpointId": "7300010000001",
+    "schemeId": "0088"
+  },
+  "customer": {
+    "endpointId": "DE123456789",
+    "schemeId": "9930"
+  },
+  "lines": [
+    {
+      "lineId": 1,
+      "quantity": 2,
+      "unitCode": "HUR",
+      "netAmount": "100.00"
+    },
+    {
+      "lineId": 2,
+      "quantity": 1,
+      "unitCode": "C62",
+      "netAmount": "250.00"
+    }
+  ],
+  "totals": {
+    "taxExclusive": "350.00",
+    "taxAmount": "84.00",
+    "payableAmount": "434.00"
+  }
+}
