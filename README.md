@@ -1,56 +1,40 @@
 # peppol-ubl-triage
 
-> **Diagnose broken UBL 2.1 / PEPPOL BIS Billing 3.0 e-invoices in seconds:** deterministic structural + `Decimal` arithmetic validation, semantic XML/JSON contract diffing, and one-command Jira/GitHub bug-repro reports.
+Zero-dependency Python CLI for diagnosing broken **OASIS UBL 2.1** and **PEPPOL BIS Billing 3.0 (EN 16931)** XML invoices, diffing XML/JSON integration payloads, and generating copy-pasteable Markdown or JSON triage reports.
 
-Built purely on public **OASIS UBL 2.1** and **EU PEPPOL BIS Billing 3.0 (EN 16931)** open standards using only the Python 3.11+ standard library (zero runtime dependencies).
+Runs on Python 3.11+ using only the standard library (`xml.etree.ElementTree`, `decimal`, `json`, `argparse`).
 
----
-
-## Why This Exists
-
-When an ERP or middleware integration fails PEPPOL / UBL validation, engineers spend too long reading raw XML payloads to find:
-- `0.01` rounding or total mismatches (`BR-CO-10`, `BR-CO-13`, `BR-CO-14`, `BR-CO-15`, `BR-CO-16`)
-- missing `EndpointID` or `@schemeID` attributes (`PEPPOL-EN16931-R010` / `-SCHEME`, `PEPPOL-EN16931-R020` / `-SCHEME`)
-- silent currency drift on a single line item (`PEPPOL-CURR-001`)
-- schema/type drift between v1 and v2 JSON or XML integration contracts
-
-`peppol-ubl-triage` turns raw payloads into a deterministic, copy-pasteable Markdown or JSON triage report in one command.
-
----
-
-## Installation
+## Install
 
 ```bash
+git clone https://github.com/Giorgoskokk06/peppol-ubl-triage.git
+cd peppol-ubl-triage
 pip install -e .
 ```
 
-For development and running tests:
+To run the test suite (15 tests):
 
 ```bash
 pip install -e ".[dev]"
 pytest -v
 ```
 
----
+## Usage
 
-## CLI Usage
-
-### 1. Validate a UBL 2.1 / PEPPOL BIS 3.0 XML invoice
+Validate an invoice against UBL 2.1 / PEPPOL BIS 3.0 rules:
 
 ```bash
 peppol-triage validate examples/invoice_valid_ubl21.xml
 peppol-triage validate examples/invoice_broken_totals.xml --format json
 ```
 
-### 2. Semantic Diff (XML or JSON)
-
-Ignores whitespace and JSON key-order noise; highlights exact XPath / JSONPath `ADDED`, `REMOVED`, `TYPE_CHANGED`, and `VALUE_CHANGED` entries:
+Diff two XML or JSON payloads while ignoring formatting and key-order noise:
 
 ```bash
 peppol-triage diff examples/invoice_v1.json examples/invoice_v2_drift.json
 ```
 
-### 3. Full Triage (Validate + Reference Diff -> Jira/GitHub Markdown)
+Run validation and reference diff together and write a Markdown report for an issue tracker:
 
 ```bash
 peppol-triage triage examples/invoice_broken_totals.xml \
@@ -59,46 +43,59 @@ peppol-triage triage examples/invoice_broken_totals.xml \
   --out triage_report.md
 ```
 
-### Exit Codes
+### Example output
 
-- `0` — Clean (valid UBL XML / no semantic diff)
-- `1` — Validation `ERROR`(s) found or semantic diff detected
-- `2` — I/O, XML/JSON parse, or format mismatch error
-
----
-
-## Sample Output
+Running `peppol-triage diff examples/invoice_v1.json examples/invoice_v2_drift.json`:
 
 ```markdown
 # PEPPOL / UBL Triage Report
 
-- **Target:** `examples/invoice_broken_totals.xml`
-- **Reference:** `examples/invoice_valid_ubl21.xml`
-- **Status:** `FAIL`
-- **Summary:** 6 error(s), 0 warning(s), 0 info, 5 diff(s)
+- **Target:** `examples/invoice_v2_drift.json`
+- **Reference:** `examples/invoice_v1.json`
+- **Status:** `DIFF_DETECTED`
+- **Summary:** 0 error(s), 0 warning(s), 0 info, 4 diff(s)
 
-## Validation Findings
+## Semantic Contract Diff
 
-| Severity | Rule ID | XPath | Message | Expected | Actual | Suggested Fix |
-| --- | --- | --- | --- | --- | --- | --- |
-| **ERROR** | `PEPPOL-EN16931-R010-SCHEME` | `/Invoice/cac:AccountingCustomerParty/cac:Party/cbc:EndpointID/@schemeID` | Customer EndpointID is missing required @schemeID attribute. | `Valid EAS schemeID (e.g., 0088, 0192, 9930)` | `<missing>` | Add schemeID attribute from the PEPPOL Electronic Address Scheme (EAS) list. |
-| **ERROR** | `PEPPOL-CURR-001` | `/Invoice/cac:InvoiceLine[2]/cbc:LineExtensionAmount/@currencyID` | Element currencyID does not match DocumentCurrencyCode. | `EUR` | `USD` | Align @currencyID to 'EUR'. |
-| **ERROR** | `BR-CO-10` | `/Invoice/cac:LegalMonetaryTotal/cbc:LineExtensionAmount` | Sum of InvoiceLine/LineExtensionAmount does not equal LegalMonetaryTotal/LineExtensionAmount. | `350.00` | `999.00` | Update LegalMonetaryTotal/cbc:LineExtensionAmount to 350.00. |
+| Change | Path | Before | After |
+| --- | --- | --- | --- |
+| **VALUE_CHANGED** | `$.currency` | `EUR` | `USD` |
+| **REMOVED** | `$.customer.schemeId` | `9930` | — |
+| **TYPE_CHANGED** | `$.lines[0].lineId` | `1` | `1` |
+| **ADDED** | `$.totals.roundingAmount` | — | `0.00` |
 ```
 
----
+Running `peppol-triage validate examples/invoice_broken_totals.xml` flags all 6 errors in the sample payload (`PEPPOL-EN16931-R010-SCHEME`, `PEPPOL-CURR-001`, `BR-CO-10`, `BR-CO-13`, `BR-CO-15`, `BR-CO-16`) with exact XPaths, expected vs. actual `Decimal` values, and suggested fixes.
 
-## Architecture
+## Checks implemented
+
+| Category | Rule IDs | What it catches |
+| :--- | :--- | :--- |
+| Mandatory header fields | `UBL-CR-001` .. `UBL-CR-006` | Missing `CustomizationID`, `ProfileID`, `ID`, ISO 8601 `IssueDate`, `InvoiceTypeCode`, or ISO 4217 `DocumentCurrencyCode` |
+| Party endpoints | `PEPPOL-EN16931-R010/-SCHEME`, `R020/-SCHEME` | Missing supplier/customer `EndpointID` or `@schemeID` |
+| Currency consistency | `PEPPOL-CURR-001` | Line or total `@currencyID` drifting from `DocumentCurrencyCode` |
+| Exact `Decimal` totals | `BR-CO-10`, `BR-CO-13`, `BR-CO-14`, `BR-CO-15`, `BR-CO-16` | Line sum, allowance/charge, tax subtotal, tax-inclusive, and payable amount mismatches |
+| Semantic diff | `ADDED`, `REMOVED`, `TYPE_CHANGED`, `VALUE_CHANGED` | Structural and type drift (including `int` vs. `str` and `bool` vs. `int`) across XML or JSON payloads |
+
+## Exit codes
+
+- `0` — Valid invoice or no semantic differences found
+- `1` — One or more validation `ERROR` findings or semantic differences detected
+- `2` — Missing file, malformed XML/JSON, or mismatched file formats
+
+## Package structure
 
 ```text
 src/peppol_triage/
-├── models.py      # Severity, DiffKind, ValidationIssue, DiffEntry, TriageReport
-├── validator.py   # OASIS UBL 2.1 / PEPPOL BIS 3.0 structural + Decimal arithmetic rules
-├── differ.py      # Canonical semantic XML & JSON differ (XPath / JSONPath)
-├── reporter.py    # Jira/GitHub-ready Markdown & JSON report renderers
-└── cli.py         # argparse CLI (`validate`, `diff`, `triage`)
+  models.py      # Dataclasses and JSON serialization
+  validator.py   # UBL 2.1 / PEPPOL BIS 3.0 header, endpoint, currency, and Decimal rules
+  differ.py      # Canonical XML (XPath) and JSON (JSONPath) differ
+  reporter.py    # Markdown and JSON report renderers
+  cli.py         # argparse entrypoint (validate, diff, triage)
+examples/        # Valid/broken UBL 2.1 XML and v1/v2 JSON sample payloads
+tests/           # 15 pytest tests covering validation, diffing, and CLI exit codes
 ```
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+[MIT](LICENSE)
